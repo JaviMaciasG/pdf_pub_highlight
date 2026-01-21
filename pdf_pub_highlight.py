@@ -3,6 +3,8 @@
 Create <file>-pub.pdf containing only pages where any given text fragment appears,
 and highlight all matches in yellow.
 
+Optionally, always include the first page.
+
 Requires: PyMuPDF (pymupdf)
 """
 
@@ -31,15 +33,14 @@ def highlight_rects_on_page(page: fitz.Page, rects: list[fitz.Rect], opacity: fl
     for r in rects:
         # Highlight annotation (visually a marker-like overlay).
         annot = page.add_highlight_annot(r)
-        # Yellow
-        annot.set_colors(stroke=(1, 1, 0))
+        annot.set_colors(stroke=(1, 1, 0))  # Yellow
         annot.set_opacity(opacity)
         annot.update()
         count += 1
     return count
 
 
-def process_pdf(input_pdf: str, fragments: list[str], *, case_sensitive: bool, whole_words: bool) -> tuple[str, int, int]:
+def process_pdf( input_pdf: str, fragments: list[str], *, case_sensitive: bool, whole_words: bool, always_add_first_page: bool, ) -> tuple[str, int, int]:
     """
     Returns (output_pdf, pages_written, total_highlights).
     """
@@ -57,7 +58,6 @@ def process_pdf(input_pdf: str, fragments: list[str], *, case_sensitive: bool, w
         flags |= fitz.TEXT_IGNORECASE
     if hasattr(fitz, "TEXT_PRESERVE_LIGATURES"):
         flags |= fitz.TEXT_PRESERVE_LIGATURES
-
     if hasattr(fitz, "TEXT_WORDS") and whole_words:
         flags |= fitz.TEXT_WORDS
 
@@ -66,6 +66,13 @@ def process_pdf(input_pdf: str, fragments: list[str], *, case_sensitive: bool, w
 
     pages_written = 0
     total_highlights = 0
+    added_pages: set[int] = set()
+
+    # Optionally add first page (page_index = 0) with no highlights
+    if always_add_first_page and src.page_count > 0:
+        out.insert_pdf(src, from_page=0, to_page=0)
+        added_pages.add(0)
+        pages_written += 1
 
     # Iterate pages, collect matches, copy matching pages to output, apply highlights there
     for page_index in range(src.page_count):
@@ -79,13 +86,18 @@ def process_pdf(input_pdf: str, fragments: list[str], *, case_sensitive: bool, w
                 page_rects.extend(rects)
 
         if page_rects:
-            # Copy this page into output
-            out.insert_pdf(src, from_page=page_index, to_page=page_index)
-            out_page = out.load_page(pages_written)
+            if page_index in added_pages:
+                # Already included (e.g., first page). Just add highlights onto the existing output page.
+                out_page_index = list(sorted(added_pages)).index(page_index)
+                out_page = out.load_page(out_page_index)
+            else:
+                out.insert_pdf(src, from_page=page_index, to_page=page_index)
+                added_pages.add(page_index)
+                out_page = out.load_page(pages_written)
+                pages_written += 1
 
             # Highlight matches on the copied page (same coordinates)
             total_highlights += highlight_rects_on_page(out_page, page_rects)
-            pages_written += 1
 
     output_pdf = build_output_name(input_pdf, suffix="-pub")
 
@@ -93,6 +105,7 @@ def process_pdf(input_pdf: str, fragments: list[str], *, case_sensitive: bool, w
     # We'll only save if at least one page was written; otherwise we skip and report.
     if pages_written > 0:
         out.save(output_pdf, garbage=4, deflate=True)
+
     out.close()
     src.close()
 
@@ -125,6 +138,11 @@ def main(argv: list[str]) -> int:
         action="store_true",
         help="Try to match whole words only (best-effort, depends on PyMuPDF flags support).",
     )
+    p.add_argument(
+        "--always-add-first-page",
+        action="store_true",
+        help="Always include the first page in the output PDF, even if it has no matches.",
+    )
     args = p.parse_args(argv)
 
     fragments = args.text
@@ -137,6 +155,7 @@ def main(argv: list[str]) -> int:
                 fragments,
                 case_sensitive=args.case_sensitive,
                 whole_words=args.whole_words,
+                always_add_first_page=args.always_add_first_page,
             )
             if pages_written == 0:
                 print(f"[{pdf}] No matches found. No output created.")
