@@ -134,7 +134,15 @@ def _find_fragment_rects_in_word_stream(
 
 
 
-def process_pdf( input_pdf: str, fragments: list[str], *, case_sensitive: bool, whole_words: bool, always_add_first_page: bool, ) -> tuple[str, int, int]:
+def process_pdf(
+    input_pdf: str,
+    fragments: list[str],
+    *,
+    case_sensitive: bool,
+    whole_words: bool,
+    always_add_first_page: bool,
+    include_all_pages: bool,  # <-- NEW
+) -> tuple[str, int, int]:
     """
     Returns (output_pdf, pages_written, total_highlights).
     """
@@ -162,8 +170,14 @@ def process_pdf( input_pdf: str, fragments: list[str], *, case_sensitive: bool, 
     total_highlights = 0
     added_pages: set[int] = set()
 
+    # --- NEW: include all pages up-front if requested
+    if include_all_pages and src.page_count > 0:
+        out.insert_pdf(src)  # copy all pages
+        added_pages = set(range(src.page_count))
+        pages_written = src.page_count
+
     # Optionally add first page (page_index = 0) with no highlights
-    if always_add_first_page and src.page_count > 0:
+    if (not include_all_pages) and always_add_first_page and src.page_count > 0:
         out.insert_pdf(src, from_page=0, to_page=0)
         added_pages.add(0)
         pages_written += 1
@@ -219,9 +233,12 @@ def process_pdf( input_pdf: str, fragments: list[str], *, case_sensitive: bool, 
 
         if page_rects:
             if page_index in added_pages:
-                # Already included (e.g., first page). Just add highlights onto the existing output page.
-                out_page_index = list(sorted(added_pages)).index(page_index)
-                out_page = out.load_page(out_page_index)
+                # Already included (e.g., first page, or include-all-pages). Just add highlights onto the existing output page.
+                if include_all_pages:
+                    out_page = out.load_page(page_index)  # <-- NEW: direct mapping in include-all-pages mode
+                else:
+                    out_page_index = list(sorted(added_pages)).index(page_index)
+                    out_page = out.load_page(out_page_index)
             else:
                 out.insert_pdf(src, from_page=page_index, to_page=page_index)
                 added_pages.add(page_index)
@@ -275,6 +292,11 @@ def main(argv: list[str]) -> int:
         action="store_true",
         help="Always include the first page in the output PDF, even if it has no matches.",
     )
+    p.add_argument(
+        "--include-all-pages",
+        action="store_true",
+        help="Include all pages in the output PDF (still highlights matches).",
+    )
     args = p.parse_args(argv)
 
     fragments = args.text
@@ -288,6 +310,7 @@ def main(argv: list[str]) -> int:
                 case_sensitive=args.case_sensitive,
                 whole_words=args.whole_words,
                 always_add_first_page=args.always_add_first_page,
+                include_all_pages=args.include_all_pages,
             )
             if pages_written == 0:
                 print(f"[{pdf}] No matches found. No output created.")
