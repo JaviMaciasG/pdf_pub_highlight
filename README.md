@@ -7,7 +7,6 @@ Given a list of **text fragments**, the tool:
 - Scans each PDF
 - Detects pages where **any fragment appears**
 - Creates a new output PDF called: `<original-file>-pub.pdf`
-```
 
 - The output contains:
   - **(Optionally) the first page always**
