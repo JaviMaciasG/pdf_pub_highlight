@@ -15,6 +15,9 @@ import os
 import sys
 import fitz  # PyMuPDF
 
+import re
+from bisect import bisect_right
+
 
 def build_output_name(input_path: str, suffix: str = "-pub") -> str:
     base, ext = os.path.splitext(input_path)
@@ -38,6 +41,97 @@ def highlight_rects_on_page(page: fitz.Page, rects: list[fitz.Rect], opacity: fl
         annot.update()
         count += 1
     return count
+
+
+def _page_word_stream(page: fitz.Page, *, case_sensitive: bool):
+    """
+    Build a page-level word stream once:
+      - words_sorted: words in reading order with their rects
+      - text_cmp: linearized text used for searching (optionally lowercased)
+      - starts: list of start char offsets per word in text_cmp
+      - ends: list of end char offsets per word in text_cmp (exclusive)
+    """
+    words = page.get_text("words")
+    if not words:
+        return [], "", [], []
+
+    # Reading order: block, line, word
+    words.sort(key=lambda w: (w[5], w[6], w[7]))
+
+    word_texts = [w[4] for w in words]
+
+    # Build linear text and per-word spans (single space between words)
+    pieces = []
+    starts = []
+    ends = []
+    pos = 0
+    for wt in word_texts:
+        starts.append(pos)
+        pieces.append(wt)
+        pos += len(wt)
+        ends.append(pos)
+        pieces.append(" ")
+        pos += 1
+
+    linear = "".join(pieces).rstrip()
+    # fix last trailing space bookkeeping: adjust last word end if we rstrip()
+    if ends:
+        # pos has included trailing space; rstrip removes it, so linear length is pos-1
+        # ends[-1] already points to end of last word, so it's fine.
+        pass
+
+    if not case_sensitive:
+        return words, linear.lower(), starts, ends
+    return words, linear, starts, ends
+
+
+def _find_fragment_rects_in_word_stream(
+    words_sorted,
+    text_cmp: str,
+    starts: list[int],
+    ends: list[int],
+    fragment: str,
+    *,
+    case_sensitive: bool
+) -> list[fitz.Rect]:
+    """
+    Find fragment inside the precomputed word-stream text_cmp and return rects for overlapping words.
+    Uses bisect to map substring ranges -> word indices quickly.
+    """
+    if not fragment:
+        return []
+
+    frag_cmp = fragment if case_sensitive else fragment.lower()
+    frag_cmp = re.sub(r"\s+", " ", frag_cmp.strip())  # normalize fragment whitespace
+
+    rects: list[fitz.Rect] = []
+    start = 0
+    n = len(text_cmp)
+
+    # Fast scan with str.find
+    while True:
+        idx = text_cmp.find(frag_cmp, start)
+        if idx < 0:
+            break
+        match_start = idx
+        match_end = idx + len(frag_cmp)
+
+        # Find first word whose end > match_start
+        i0 = bisect_right(ends, match_start)
+        # Find last word whose start < match_end
+        i1 = bisect_right(starts, match_end - 1) - 1
+
+        if 0 <= i0 <= i1 < len(words_sorted):
+            for i in range(i0, i1 + 1):
+                x0, y0, x1, y1 = words_sorted[i][0], words_sorted[i][1], words_sorted[i][2], words_sorted[i][3]
+                rects.append(fitz.Rect(x0, y0, x1, y1))
+
+        start = idx + 1
+        if start >= n:
+            break
+
+    return rects
+
 
 
 def process_pdf( input_pdf: str, fragments: list[str], *, case_sensitive: bool, whole_words: bool, always_add_first_page: bool, ) -> tuple[str, int, int]:
@@ -78,12 +172,50 @@ def process_pdf( input_pdf: str, fragments: list[str], *, case_sensitive: bool, 
     for page_index in range(src.page_count):
         page = src.load_page(page_index)
 
-        page_rects: list[fitz.Rect] = []
-        for frag in fragments:
-            # Find all occurrences of fragment on this page
-            rects = page.search_for(frag, flags=flags)
-            if rects:
-                page_rects.extend(rects)
+        if 0:
+            page_rects: list[fitz.Rect] = []
+            for frag in fragments:
+                # Find all occurrences of fragment on this page
+                rects = page.search_for(frag, flags=flags)
+                if rects:
+                    page_rects.extend(rects)
+        else:
+            page_rects: list[fitz.Rect] = []
+
+            # Build the word-stream only if we need the fallback on this page
+            word_stream_built = False
+            words_sorted = []
+            text_cmp = ""
+            starts = []
+            ends = []
+
+            for frag in fragments:
+                # 1) Fast path: normal search
+                rects = page.search_for(frag, flags=flags)
+
+                # 2) Slow fallback only if needed:
+                #    - native search didn't find anything
+                #    - fragment likely spans lines/spaces/hyphenation
+                if not rects and (" " in frag or "\t" in frag or "-" in frag):
+                    if not word_stream_built:
+                        words_sorted, text_cmp, starts, ends = _page_word_stream(
+                        page,
+                        case_sensitive=case_sensitive
+                        )
+                        word_stream_built = True
+
+                    if text_cmp:
+                        rects = _find_fragment_rects_in_word_stream(
+                        words_sorted,
+                        text_cmp,
+                        starts,
+                        ends,
+                        frag,
+                        case_sensitive=case_sensitive
+                        )
+
+                if rects:
+                    page_rects.extend(rects)
 
         if page_rects:
             if page_index in added_pages:
