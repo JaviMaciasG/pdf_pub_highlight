@@ -13,7 +13,7 @@ Given a list of **text fragments**, the tool:
   - **Only the pages where matches are found**
 - Every match is **highlighted in yellow** (PDF highlight annotation)
 
-It is especially useful for quickly producing “public” versions of documents by keeping only the pages that contain required **funding acknowledgements**, **grant codes**, or **institutional boilerplate**. In my case this was to support the generation of justification documents that show proper publicity of funding sources.
+It is especially useful for quickly producing “public” versions of documents by keeping only the pages that contain required **funding acknowledgements**, **grant codes**, or **institutional boilerplate**. I needed this to support the generation of justification documents that show proper publicity of funding sources.
 
 
 
