@@ -10,7 +10,7 @@ Given a list of **text fragments**, the tool:
 
 - The output contains:
   - **(Optionally) the first page always**
-  - **Only the pages where matches are found**
+  - **Only the pages where matches are found** (unless `--include-all-pages` is used)
 - Every match is **highlighted in yellow** (PDF highlight annotation)
 
 It is especially useful for quickly producing “public” versions of documents by keeping only the pages that contain required **funding acknowledgements**, **grant codes**, or **institutional boilerplate**. I needed this to support the generation of justification documents that show proper publicity of funding sources.
@@ -73,6 +73,33 @@ python pdf_pub_highlight.py --always-add-first-page -t "PID2020-113118RB-C31" my
 ```
 
 This forces the output PDF to always contain page 1 (index 0).
+
+### Include all pages
+
+If you want the output PDF to include **all pages** (not only those containing the requested fragments) while still highlighting matches, use:
+
+```bash
+python pdf_pub_highlight.py --include-all-pages -t "PID2020-113118RB-C31" myfile.pdf
+```
+
+
+
+### Output directory
+
+By default, output PDFs are saved into the **current directory** (`./`).
+
+You can change the output destination with:
+
+```bash
+python pdf_pub_highlight.py --output-dir out -t "PID2020-113118RB-C31" myfile.pdf
+```
+
+Notes:
+
+- If `--output-dir` is an **absolute path**, it is created/used as-is.
+- If `--output-dir` is a **relative path**, it is created relative to the **directory of each input PDF**.
+- The directory is created automatically if it does not exist.
+
 
 
 
