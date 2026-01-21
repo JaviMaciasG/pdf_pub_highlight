@@ -142,6 +142,7 @@ def process_pdf(
     whole_words: bool,
     always_add_first_page: bool,
     include_all_pages: bool,  # <-- NEW
+    output_dir: str,  # <-- NEW
 ) -> tuple[str, int, int]:
     """
     Returns (output_pdf, pages_written, total_highlights).
@@ -250,6 +251,14 @@ def process_pdf(
 
     output_pdf = build_output_name(input_pdf, suffix="-pub")
 
+    # --- NEW: resolve and create output directory
+    if os.path.isabs(output_dir):
+        final_out_dir = output_dir
+    else:
+        final_out_dir = os.path.join(os.path.dirname(os.path.abspath(input_pdf)), output_dir)
+    os.makedirs(final_out_dir, exist_ok=True)
+    output_pdf = os.path.join(final_out_dir, os.path.basename(output_pdf))
+
     # If nothing matched, still create a valid PDF with 0 pages? Many tools dislike that.
     # We'll only save if at least one page was written; otherwise we skip and report.
     if pages_written > 0:
@@ -297,6 +306,11 @@ def main(argv: list[str]) -> int:
         action="store_true",
         help="Include all pages in the output PDF (still highlights matches).",
     )
+    p.add_argument(
+        "--output-dir",
+        default="./",
+        help="Output directory. Absolute paths are used as-is; relative paths are resolved from each input PDF directory. Default: ./",
+    )
     args = p.parse_args(argv)
 
     fragments = args.text
@@ -311,6 +325,7 @@ def main(argv: list[str]) -> int:
                 whole_words=args.whole_words,
                 always_add_first_page=args.always_add_first_page,
                 include_all_pages=args.include_all_pages,
+                output_dir=args.output_dir,
             )
             if pages_written == 0:
                 print(f"[{pdf}] No matches found. No output created.")
